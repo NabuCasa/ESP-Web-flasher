@@ -7,7 +7,8 @@
   "author": "Nabu Casa",
   "license": "MIT",
   "scripts": {
-    "prepublishOnly": "script/build"
+    "prepublishOnly": "script/build",
+    "prepare": "script/build"
   },
   "devDependencies": {
     "@rollup/plugin-json": "^4.1.0",

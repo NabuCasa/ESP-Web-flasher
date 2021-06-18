@@ -45,6 +45,7 @@ export class ESPLoader extends EventTarget {
   debug = false;
   IS_STUB = false;
   connected = true;
+  stopReadLoop = false;
 
   __inputBuffer?: number[];
   private _reader?: ReadableStreamDefaultReader<Uint8Array>;
@@ -125,7 +126,7 @@ export class ESPLoader extends EventTarget {
     this._reader = this.port.readable!.getReader();
 
     try {
-      while (true) {
+      while (!this.stopReadLoop) {
         const { value, done } = await this._reader.read();
         if (done) {
           this._reader.releaseLock();
@@ -452,15 +453,26 @@ export class ESPLoader extends EventTarget {
       try {
         let buffer = pack("<II", baud, 0);
         await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
-        // this.port.baudRate = baud;
-        await sleep(50);
-        await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
+
+        //Since SerialPort does not allow to be reconfigured, we need to close it, and re-open it with the new BaudRate after issuing the Command to Change Baud Rate
+        //We stop the ReadLoop
+        this.stopReadLoop = true;
+        await this._reader!.cancel();
+        await this._reader!.releaseLock();
+        await this.port.close();
+        
+        //Reopen Port
+        await this.port.open({ baudRate: baud });
+
+        //Restart Readloop
+        this.stopReadLoop = false;
+        this.readLoop();
+
         this.logger.log("Changed baud rate to " + baud);
       } catch (e) {
         throw (
-          "Unable to change the baud rate, please try setting the connection speed from " +
-          baud +
-          " to 115200 and reconnecting."
+          "Unable to change the baud rate to " +
+          baud + "."
         );
       }
     }

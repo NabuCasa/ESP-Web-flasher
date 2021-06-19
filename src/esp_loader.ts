@@ -460,10 +460,10 @@ export class ESPLoader extends EventTarget {
         var readLoopRunner = this._parent ? this._parent : this;
 
         readLoopRunner.stopReadLoop = true;
-        await readLoopRunner._reader!.cancel();
-        await readLoopRunner._reader!.releaseLock();
+        await readLoopRunner._reader?.cancel();
+        readLoopRunner._reader?.releaseLock();
         await readLoopRunner.port.close();
-        
+
         //Reopen Port
         await readLoopRunner.port.open({ baudRate: baud });
 
@@ -473,10 +473,7 @@ export class ESPLoader extends EventTarget {
 
         this.logger.log("Changed baud rate to " + baud);
       } catch (e) {
-        throw (
-          "Unable to change the baud rate to " +
-          baud + "."
-        );
+        throw "Unable to change the baud rate to " + baud + ".";
       }
     }
   }

@@ -451,22 +451,25 @@ export class ESPLoader extends EventTarget {
     } else {
       this.logger.log("Attempting to change baud rate to " + baud + "...");
       try {
-        let buffer = pack("<II", baud, 0);
+        //We send 115200 as the old one, otherwise the STUB seems to not work properly after changing the baud rate.
+        let buffer = pack("<II", baud, 115200);
         await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
 
         //Since SerialPort does not allow to be reconfigured, we need to close it, and re-open it with the new BaudRate after issuing the Command to Change Baud Rate
         //We stop the ReadLoop
-        this.stopReadLoop = true;
-        await this._reader!.cancel();
-        await this._reader!.releaseLock();
-        await this.port.close();
+        var readLoopRunner = this._parent ? this._parent : this;
+
+        readLoopRunner.stopReadLoop = true;
+        await readLoopRunner._reader!.cancel();
+        await readLoopRunner._reader!.releaseLock();
+        await readLoopRunner.port.close();
         
         //Reopen Port
-        await this.port.open({ baudRate: baud });
+        await readLoopRunner.port.open({ baudRate: baud });
 
         //Restart Readloop
-        this.stopReadLoop = false;
-        this.readLoop();
+        readLoopRunner.stopReadLoop = false;
+        readLoopRunner.readLoop();
 
         this.logger.log("Changed baud rate to " + baud);
       } catch (e) {

@@ -468,7 +468,7 @@ export class ESPLoader extends EventTarget {
     } catch (e) {
       console.error(e);
       throw new Error(
-        `Unable to change the baud rate to $(baud): No response from set baud rate command.`
+        `Unable to change the baud rate to ${baud}: No response from set baud rate command.`
       );
     }
 

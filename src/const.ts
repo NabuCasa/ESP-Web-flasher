@@ -18,7 +18,8 @@ export const flashSizes = {
   "16MB": 0x90,
 };
 
-export const FLASH_WRITE_SIZE = 0x200;
+export const FLASH_WRITE_SIZE = 0x400; //Looking at the latest esptool.py 0x400 is the minumum FLASH_WRITE_SIZE
+export const STUB_FLASH_WRITE_SIZE = 0x4000; //Looking at the latest esptool.py it looks like all STUBS have 0x4000 as flash size
 export const ESP32S2_FLASH_WRITE_SIZE = 0x400;
 export const FLASH_SECTOR_SIZE = 0x1000; // Flash sector size, minimum unit of erase.
 export const ESP_ROM_BAUD = 115200;

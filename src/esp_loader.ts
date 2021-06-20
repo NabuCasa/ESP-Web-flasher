@@ -85,7 +85,7 @@ export class ESPLoader extends EventTarget {
     } else if (datareg == ESP32S2_DATAREGVALUE) {
       this.chipFamily = CHIP_FAMILY_ESP32S2;
     } else {
-      throw "Unknown Chip.";
+      throw new Error("Unknown Chip.");
     }
 
     // Read the OTP data for this chip and store into this.efuses array
@@ -180,7 +180,7 @@ export class ESPLoader extends EventTarget {
       } else if (((mac1 >> 16) & 0xff) == 1) {
         oui = [0xac, 0xd0, 0x74];
       } else {
-        throw "Couldnt determine OUI";
+        throw new Error("Couldnt determine OUI");
       }
 
       macAddr[0] = oui[0];
@@ -204,7 +204,7 @@ export class ESPLoader extends EventTarget {
       macAddr[4] = (mac1 >> 8) & 0xff;
       macAddr[5] = mac1 & 0xff;
     } else {
-      throw "Unknown chip family";
+      throw new Error("Unknown chip family");
     }
     return macAddr;
   }
@@ -239,7 +239,7 @@ export class ESPLoader extends EventTarget {
     let [value, data] = await this.getResponse(opcode, timeout);
 
     if (data === null) {
-      throw "Didn't get enough status bytes";
+      throw new Error("Didn't get enough status bytes");
     }
 
     let statusLen = 0;
@@ -257,7 +257,7 @@ export class ESPLoader extends EventTarget {
     }
 
     if (data.length < statusLen) {
-      throw "Didn't get enough status bytes";
+      throw new Error("Didn't get enough status bytes");
     }
     let status = data.slice(-statusLen, data.length);
     data = data.slice(0, -statusLen);
@@ -268,9 +268,9 @@ export class ESPLoader extends EventTarget {
     }
     if (status[0] == 1) {
       if (status[1] == ROM_INVALID_RECV_MSG) {
-        throw "Invalid (unsupported) command " + toHex(opcode);
+        throw new Error("Invalid (unsupported) command " + toHex(opcode));
       } else {
-        throw "Command failure error code " + toHex(status[1]);
+        throw new Error("Command failure error code " + toHex(status[1]));
       }
     }
     return [value, data];
@@ -467,7 +467,9 @@ export class ESPLoader extends EventTarget {
       await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
     } catch (e) {
       console.error(e);
-      throw `Unable to change the baud rate to $(baud): No response from set baud rate command.`;
+      throw new Error(
+        `Unable to change the baud rate to $(baud): No response from set baud rate command.`
+      );
     }
 
     try {
@@ -487,7 +489,7 @@ export class ESPLoader extends EventTarget {
       this.logger.log(`Changed baud rate to ${baud}`);
     } catch (e) {
       console.error(e);
-      throw `Unable to change the baud rate to ${baud}: ${e}`;
+      throw new Error(`Unable to change the baud rate to ${baud}: ${e}`);
     }
   }
 
@@ -506,7 +508,7 @@ export class ESPLoader extends EventTarget {
       await sleep(100);
     }
 
-    throw "Couldn't sync to ESP. Try resetting.";
+    throw new Error("Couldn't sync to ESP. Try resetting.");
   }
 
   /**
@@ -771,7 +773,7 @@ export class ESPLoader extends EventTarget {
     const pChar = String.fromCharCode(...p!);
 
     if (pChar != "OHAI") {
-      throw "Failed to start stub. Unexpected response: " + pChar;
+      throw new Error("Failed to start stub. Unexpected response: " + pChar);
     }
     this.logger.log("Stub is now running...");
     const espStubLoader = new EspStubLoader(this.port, this.logger, this);
@@ -834,18 +836,18 @@ class EspStubLoader extends ESPLoader {
       [stub.text_start, stub.text_start + stub.text.length],
     ]) {
       if (load_start < end && load_end > start) {
-        throw (
+        throw new Error(
           "Software loader is resident at " +
-          toHex(start, 8) +
-          "-" +
-          toHex(end, 8) +
-          ". " +
-          "Can't load binary at overlapping address range " +
-          toHex(load_start, 8) +
-          "-" +
-          toHex(load_end, 8) +
-          ". " +
-          "Try changing the binary loading address."
+            toHex(start, 8) +
+            "-" +
+            toHex(end, 8) +
+            ". " +
+            "Can't load binary at overlapping address range " +
+            toHex(load_start, 8) +
+            "-" +
+            toHex(load_end, 8) +
+            ". " +
+            "Try changing the binary loading address."
         );
       }
     }

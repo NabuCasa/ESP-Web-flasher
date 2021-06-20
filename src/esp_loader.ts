@@ -7,7 +7,6 @@ import {
   DEFAULT_TIMEOUT,
   ERASE_REGION_TIMEOUT_PER_MB,
   ESP32S2_DATAREGVALUE,
-  //ESP32S2_FLASH_WRITE_SIZE,
   ESP32_DATAREGVALUE,
   ESP8266_DATAREGVALUE,
   ESP_CHANGE_BAUDRATE,
@@ -509,7 +508,6 @@ export class ESPLoader extends EventTarget {
    * Get the Flash write size based on the chip
    */
   getFlashWriteSize() {
-    //It looks like all stubs share the same Flash Write size, otherwise it defaults to 0x400
     if (this.IS_STUB) {
       return STUB_FLASH_WRITE_SIZE;
     }

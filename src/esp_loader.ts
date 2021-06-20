@@ -123,6 +123,8 @@ export class ESPLoader extends EventTarget {
    * Reads data from the input stream and places it in the inputBuffer
    */
   async readLoop() {
+    this.logger.debug("Starting read loop");
+
     this._reader = this.port.readable!.getReader();
 
     try {
@@ -138,10 +140,12 @@ export class ESPLoader extends EventTarget {
         this._inputBuffer.push(...Array.from(value));
       }
     } catch (err) {
+      console.error("Read loop got disconnected");
       // Disconnected!
       this.connected = false;
       this.dispatchEvent(new Event("disconnect"));
     }
+    this.logger.debug("Finished read loop");
   }
 
   async hardReset(bootloader = false) {
@@ -446,34 +450,44 @@ export class ESPLoader extends EventTarget {
   }
 
   async setBaudrate(baud: number) {
+    if (this._parent) {
+      await this._parent.setBaudrate(baud);
+      return;
+    }
+
     if (this.chipFamily == CHIP_FAMILY_ESP8266) {
-      this.logger.log("Baud rate can only change on ESP32 and ESP32-S2");
-    } else {
-      this.logger.log("Attempting to change baud rate to " + baud + "...");
-      try {
-        // Send 115200 as the old one, otherwise the STUB seems to not work properly after changing the baud rate.
-        let buffer = pack("<II", baud, 115200);
-        await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
+      throw new Error("Changing baud rate is not supported on the ESP8266");
+    }
 
-        // SerialPort does not allow to be reconfigured while open so we close and re-open
-        var readLoopRunner = this._parent ? this._parent : this;
+    this.logger.log("Attempting to change baud rate to " + baud + "...");
 
-        readLoopRunner.stopReadLoop = true;
-        await readLoopRunner._reader?.cancel();
-        readLoopRunner._reader?.releaseLock();
-        await readLoopRunner.port.close();
+    try {
+      // Send 115200 as the old one, otherwise the STUB seems to not work properly after changing the baud rate.
+      let buffer = pack("<II", baud, 115200);
+      await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
+    } catch (e) {
+      console.error(e);
+      throw `Unable to change the baud rate to $(baud): No response from set baud rate command.`;
+    }
 
-        // Reopen Port
-        await readLoopRunner.port.open({ baudRate: baud });
+    try {
+      // SerialPort does not allow to be reconfigured while open so we close and re-open
+      this.stopReadLoop = true;
+      await this._reader?.cancel();
+      this._reader?.releaseLock();
+      await this.port.close();
 
-        // Restart Readloop
-        readLoopRunner.stopReadLoop = false;
-        readLoopRunner.readLoop();
+      // Reopen Port
+      await this.port.open({ baudRate: baud });
 
-        this.logger.log("Changed baud rate to " + baud);
-      } catch (e) {
-        throw "Unable to change the baud rate to " + baud + ".";
-      }
+      // Restart Readloop
+      this.stopReadLoop = false;
+      this.readLoop();
+
+      this.logger.log(`Changed baud rate to ${baud}`);
+    } catch (e) {
+      console.error(e);
+      throw `Unable to change the baud rate to ${baud}: ${e}`;
     }
   }
 
@@ -538,7 +552,7 @@ export class ESPLoader extends EventTarget {
     offset = 0
   ) {
     let filesize = binaryData.byteLength;
-    this.logger.log("\nWriting data with filesize:" + filesize);
+    this.logger.log("Writing data with filesize:" + filesize);
     await this.flashBegin(filesize, offset);
     let block = [];
     let seq = 0;

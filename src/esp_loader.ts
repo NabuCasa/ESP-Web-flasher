@@ -33,6 +33,7 @@ import {
   ESP_ERASE_FLASH,
   CHIP_ERASE_TIMEOUT,
   timeoutPerMb,
+  ESP_ROM_BAUD,
 } from "./const";
 import { getStubCode } from "./stubs";
 import { pack, sleep, slipEncode, toHex, unpack } from "./util";
@@ -447,33 +448,48 @@ export class ESPLoader extends EventTarget {
 
   async setBaudrate(baud: number) {
     if (this.chipFamily == CHIP_FAMILY_ESP8266) {
-      this.logger.log("Baud rate can only change on ESP32 and ESP32-S2");
+      throw new Error("Changing baud rate is not supported on the ESP8266");
+    }
+
+    this.logger.log("Attempting to change baud rate to " + baud + "...");
+
+    try {
+      // Send ESP_ROM_BAUD(115200) as the old one if running STUB otherwise 0
+      let buffer = pack("<II", baud, this.IS_STUB ? ESP_ROM_BAUD : 0);
+      await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
+    } catch (e) {
+      console.error(e);
+      throw new Error(
+        `Unable to change the baud rate to ${baud}: No response from set baud rate command.`
+      );
+    }
+
+    if (this._parent) {
+      await this._parent.reconfigurePort(baud);
     } else {
-      this.logger.log("Attempting to change baud rate to " + baud + "...");
-      try {
-        // Send 115200 as the old one, otherwise the STUB seems to not work properly after changing the baud rate.
-        let buffer = pack("<II", baud, 115200);
-        await this.checkCommand(ESP_CHANGE_BAUDRATE, buffer);
+      await this.reconfigurePort(baud);
+    }
+  }
 
-        // SerialPort does not allow to be reconfigured while open so we close and re-open
-        var readLoopRunner = this._parent ? this._parent : this;
+  async reconfigurePort(baud: number) {
+    try {
+      // SerialPort does not allow to be reconfigured while open so we close and re-open
+      this.stopReadLoop = true;
+      await this._reader?.cancel();
+      this._reader?.releaseLock();
+      await this.port.close();
 
-        readLoopRunner.stopReadLoop = true;
-        await readLoopRunner._reader?.cancel();
-        readLoopRunner._reader?.releaseLock();
-        await readLoopRunner.port.close();
+      // Reopen Port
+      await this.port.open({ baudRate: baud });
 
-        // Reopen Port
-        await readLoopRunner.port.open({ baudRate: baud });
+      // Restart Readloop
+      this.stopReadLoop = false;
+      this.readLoop();
 
-        // Restart Readloop
-        readLoopRunner.stopReadLoop = false;
-        readLoopRunner.readLoop();
-
-        this.logger.log("Changed baud rate to " + baud);
-      } catch (e) {
-        throw "Unable to change the baud rate to " + baud + ".";
-      }
+      this.logger.log(`Changed baud rate to ${baud}`);
+    } catch (e) {
+      console.error(e);
+      throw new Error(`Unable to change the baud rate to ${baud}: ${e}`);
     }
   }
 

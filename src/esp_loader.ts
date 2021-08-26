@@ -47,11 +47,13 @@ import {
   DETECTED_FLASH_SIZES,
   CHIP_DETECT_MAGIC_REG_ADDR,
   CHIP_DETECT_MAGIC_VALUES,
+  SlipReadError,
 } from "./const";
 import { getStubCode } from "./stubs";
-import { pack, sleep, slipEncode, toHex, unpack } from "./util";
+import { hexFormatter, sleep, slipEncode, toHex } from "./util";
 // @ts-ignore
 import { deflate } from "pako/dist/pako.esm.mjs";
+import { pack, unpack } from "./struct";
 
 export class ESPLoader extends EventTarget {
   chipFamily!: ChipFamily;
@@ -78,10 +80,6 @@ export class ESPLoader extends EventTarget {
     return this._parent ? this._parent._inputBuffer : this.__inputBuffer!;
   }
 
-  /**
-   * @name chipType
-   * ESP32 or ESP8266 based on which chip type we're talking to
-   */
   async initialize() {
     await this.hardReset(true);
 
@@ -220,17 +218,14 @@ export class ESPLoader extends EventTarget {
     return macAddr;
   }
 
-  /**
-   * @name readRegister
-   * Read a register within the ESP chip RAM, returns a 4-element list
-   */
   async readRegister(reg: number) {
     if (this.debug) {
-      this.logger.debug("Reading Register", reg);
+      this.logger.debug("Reading from Register " + toHex(reg, 8));
     }
-    let packet = pack("I", reg);
-    let register = (await this.checkCommand(ESP_READ_REG, packet))[0];
-    return unpack("I", register!)[0];
+    let packet = pack("<I", reg);
+    await this.sendCommand(ESP_READ_REG, packet);
+    let [val, _data] = await this.getResponse(ESP_READ_REG);
+    return val;
   }
 
   /**
@@ -244,7 +239,7 @@ export class ESPLoader extends EventTarget {
     buffer: number[],
     checksum = 0,
     timeout = DEFAULT_TIMEOUT
-  ) {
+  ): Promise<[number, number[]]> {
     timeout = Math.min(timeout, MAX_TIMEOUT);
     await this.sendCommand(opcode, buffer, checksum);
     let [value, data] = await this.getResponse(opcode, timeout);
@@ -315,76 +310,128 @@ export class ESPLoader extends EventTarget {
   }
 
   /**
+   * @name readPacket
+   * Generator to read SLIP packets from a serial port.
+   * Yields one full SLIP packet at a time, raises exception on timeout or invalid data.
+   * Designed to avoid too many calls to serial.read(1), which can bog
+   * down on slow systems.
+   */
+
+  async readPacket(timeout: number): Promise<number[]> {
+    let partialPacket: number[] | null = null;
+    let inEscape = false;
+    let readBytes: number[] = [];
+    while (true) {
+      let stamp = Date.now();
+      readBytes = [];
+      while (Date.now() - stamp < timeout) {
+        if (this._inputBuffer.length > 0) {
+          readBytes.push(this._inputBuffer.shift()!);
+          break;
+        } else {
+          await sleep(10);
+        }
+      }
+      if (readBytes.length == 0) {
+        let waitingFor = partialPacket === null ? "header" : "content";
+        throw new SlipReadError("Timed out waiting for packet " + waitingFor);
+      }
+      if (this.debug)
+        this.logger.debug(
+          "Read " + readBytes.length + " bytes: " + hexFormatter(readBytes)
+        );
+      for (let b of readBytes) {
+        if (partialPacket === null) {
+          // waiting for packet header
+          if (b == 0xc0) {
+            partialPacket = [];
+          } else {
+            if (this.debug) {
+              this.logger.debug(
+                "Read invalid data: " + hexFormatter(readBytes)
+              );
+              this.logger.debug(
+                "Remaining data in serial buffer: " +
+                  hexFormatter(this._inputBuffer)
+              );
+            }
+            throw new SlipReadError(
+              "Invalid head of packet (" + toHex(b) + ")"
+            );
+          }
+        } else if (inEscape) {
+          // part-way through escape sequence
+          inEscape = false;
+          if (b == 0xdc) {
+            partialPacket.push(0xc0);
+          } else if (b == 0xdd) {
+            partialPacket.push(0xdb);
+          } else {
+            if (this.debug) {
+              this.logger.debug(
+                "Read invalid data: " + hexFormatter(readBytes)
+              );
+              this.logger.debug(
+                "Remaining data in serial buffer: " +
+                  hexFormatter(this._inputBuffer)
+              );
+            }
+            throw new SlipReadError(
+              "Invalid SLIP escape (0xdb, " + toHex(b) + ")"
+            );
+          }
+        } else if (b == 0xdb) {
+          // start of escape sequence
+          inEscape = true;
+        } else if (b == 0xc0) {
+          // end of packet
+          if (this.debug)
+            this.logger.debug(
+              "Received full packet: " + hexFormatter(partialPacket)
+            );
+          return partialPacket;
+        } else {
+          // normal byte in packet
+          partialPacket.push(b);
+        }
+      }
+    }
+    throw new SlipReadError("Invalid state");
+  }
+
+  /**
    * @name getResponse
    * Read response data and decodes the slip packet, then parses
    * out the value/data and returns as a tuple of (value, data) where
    * each is a list of bytes
    */
-  async getResponse(opcode: number, timeout = DEFAULT_TIMEOUT) {
-    let reply: number[] = [];
-    let packetLength = 0;
-    let escapedByte = false;
-    let stamp = Date.now();
-    while (Date.now() - stamp < timeout) {
-      if (this._inputBuffer.length > 0) {
-        let c = this._inputBuffer.shift()!;
-        if (c == 0xdb) {
-          escapedByte = true;
-        } else if (escapedByte) {
-          if (c == 0xdd) {
-            reply.push(0xdc);
-          } else if (c == 0xdc) {
-            reply.push(0xc0);
-          } else {
-            reply = reply.concat([0xdb, c]);
-          }
-          escapedByte = false;
-        } else {
-          reply.push(c);
-        }
-      } else {
-        await sleep(10);
-      }
-      if (reply.length > 0 && reply[0] != 0xc0) {
-        // packets must start with 0xC0
-        reply.shift();
-      }
-      if (reply.length > 1 && reply[1] != 0x01) {
-        reply.shift();
-      }
-      if (reply.length > 2 && reply[2] != opcode) {
-        reply.shift();
-      }
-      if (reply.length > 4) {
-        // get the length
-        packetLength = reply[3] + (reply[4] << 8);
-      }
-      if (reply.length == packetLength + 10) {
-        break;
-      }
-    }
+  async getResponse(
+    opcode: number,
+    timeout = DEFAULT_TIMEOUT
+  ): Promise<[number, number[]]> {
+    let packet;
+    let resp, opRet, lenRet, val, data;
+    for (let i = 0; i < 100; i++) {
+      packet = await this.readPacket(timeout);
 
-    // Check to see if we have a complete packet. If not, we timed out.
-    if (reply.length != packetLength + 10) {
-      this.logger.log("Timed out after " + timeout + " milliseconds");
-      return [null, null];
+      if (packet.length < 8) {
+        continue;
+      }
+
+      [resp, opRet, lenRet, val] = unpack("<BBHI", packet.slice(0, 8));
+      if (resp != 1) {
+        continue;
+      }
+      data = packet.slice(8);
+      if (opcode == null || opRet == opcode) {
+        return [val, data];
+      }
+      if (data[0] != 0 && data[1] == ROM_INVALID_RECV_MSG) {
+        this._inputBuffer.length = 0;
+        throw new Error(`Invalid (unsupported) command ${toHex(opcode)}`);
+      }
     }
-    if (this.debug) {
-      this.logger.debug(
-        "Reading " +
-          reply.length +
-          " byte" +
-          (reply.length == 1 ? "" : "s") +
-          ":",
-        reply
-      );
-    }
-    let value = reply.slice(5, 9);
-    let data = reply.slice(9, -1);
-    if (this.debug) {
-      this.logger.debug("value:", value, "data:", data);
-    }
-    return [value, data];
+    throw "Response doesn't match request";
   }
 
   /**

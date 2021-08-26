@@ -435,68 +435,6 @@ export class ESPLoader extends EventTarget {
   }
 
   /**
-   * @name read
-   * Read response data and decodes the slip packet.
-   * Keeps reading until we hit the timeout or get
-   * a packet closing byte
-   */
-  async readBuffer(timeout = DEFAULT_TIMEOUT) {
-    let reply: number[] = [];
-    // let packetLength = 0;
-    let escapedByte = false;
-    let stamp = Date.now();
-    while (Date.now() - stamp < timeout) {
-      if (this._inputBuffer.length > 0) {
-        let c = this._inputBuffer.shift()!;
-        if (c == 0xdb) {
-          escapedByte = true;
-        } else if (escapedByte) {
-          if (c == 0xdd) {
-            reply.push(0xdc);
-          } else if (c == 0xdc) {
-            reply.push(0xc0);
-          } else {
-            reply = reply.concat([0xdb, c]);
-          }
-          escapedByte = false;
-        } else {
-          reply.push(c);
-        }
-      } else {
-        await sleep(10);
-      }
-      if (reply.length > 0 && reply[0] != 0xc0) {
-        // packets must start with 0xC0
-        reply.shift();
-      }
-      if (reply.length > 1 && reply[reply.length - 1] == 0xc0) {
-        break;
-      }
-    }
-
-    // Check to see if we have a complete packet. If not, we timed out.
-    if (reply.length < 2) {
-      this.logger.log("Timed out after " + timeout + " milliseconds");
-      return null;
-    }
-    if (this.debug) {
-      this.logger.debug(
-        "Reading " +
-          reply.length +
-          " byte" +
-          (reply.length == 1 ? "" : "s") +
-          ":",
-        reply
-      );
-    }
-    let data = reply.slice(1, -1);
-    if (this.debug) {
-      this.logger.debug("data:", data);
-    }
-    return data;
-  }
-
-  /**
    * @name checksum
    * Calculate checksum of a blob, as it is defined by the ROM
    */
@@ -561,6 +499,7 @@ export class ESPLoader extends EventTarget {
    */
   async sync() {
     for (let i = 0; i < 5; i++) {
+      this._inputBuffer.length = 0;
       let response = await this._sync();
       if (response) {
         await sleep(100);
@@ -580,12 +519,13 @@ export class ESPLoader extends EventTarget {
   async _sync() {
     await this.sendCommand(ESP_SYNC, SYNC_PACKET);
     for (let i = 0; i < 8; i++) {
-      let [_reply, data] = await this.getResponse(ESP_SYNC, SYNC_TIMEOUT);
-      if (data === null) {
-        continue;
-      }
-      if (data.length > 1 && data[0] == 0 && data[1] == 0) {
-        return true;
+      try {
+        let [_reply, data] = await this.getResponse(ESP_SYNC, SYNC_TIMEOUT);
+        if (data.length > 1 && data[0] == 0 && data[1] == 0) {
+          return true;
+        }
+      } catch (err) {
+        // If read packet fails.
       }
     }
     return false;
@@ -728,7 +668,10 @@ export class ESPLoader extends EventTarget {
     let eraseSize;
     let buffer;
     let flashWriteSize = this.getFlashWriteSize();
-    if ([CHIP_FAMILY_ESP32, CHIP_FAMILY_ESP32S2].includes(this.chipFamily)) {
+    if (
+      !this.IS_STUB &&
+      [CHIP_FAMILY_ESP32, CHIP_FAMILY_ESP32S2].includes(this.chipFamily)
+    ) {
       await this.checkCommand(ESP_SPI_ATTACH, new Array(8).fill(0));
     }
     if (this.chipFamily == CHIP_FAMILY_ESP32) {
@@ -1191,8 +1134,10 @@ export class ESPLoader extends EventTarget {
     this.logger.log("Running stub...");
     await this.memFinish(stub["entry"]);
 
-    const p = await this.readBuffer(100);
-    const pChar = String.fromCharCode(...p!);
+    let pChar: string;
+
+    const p = await this.readPacket(500);
+    pChar = String.fromCharCode(...p);
 
     if (pChar != "OHAI") {
       throw new Error("Failed to start stub. Unexpected response: " + pChar);

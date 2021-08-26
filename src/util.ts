@@ -4,7 +4,7 @@
  * 0xdb is replaced with 0xdb 0xdd and 0xc0 is replaced with 0xdb 0xdc
  */
 export const slipEncode = (buffer: number[]): number[] => {
-  let encoded: number[] = [];
+  let encoded = [0xc0];
   for (let byte of buffer) {
     if (byte == 0xdb) {
       encoded = encoded.concat([0xdb, 0xdd]);
@@ -14,6 +14,7 @@ export const slipEncode = (buffer: number[]): number[] => {
       encoded.push(byte);
     }
   }
+  encoded.push(0xc0);
   return encoded;
 };
 

@@ -109,7 +109,7 @@ export class ESPLoader extends EventTarget {
     if (this.chipFamily == CHIP_FAMILY_ESP8266) {
       baseAddr = 0x3ff00050;
     } else if (this.chipFamily == CHIP_FAMILY_ESP32) {
-      baseAddr = 0x6001a000;
+      baseAddr = 0x3ff5a000;
     } else if (this.chipFamily == CHIP_FAMILY_ESP32S2) {
       baseAddr = 0x6001a000;
     }
@@ -279,6 +279,7 @@ export class ESPLoader extends EventTarget {
         throw new Error("Command failure error code " + toHex(status[1]));
       }
     }
+
     return [value, data];
   }
 
@@ -288,21 +289,13 @@ export class ESPLoader extends EventTarget {
    * does not check response
    */
   async sendCommand(opcode: number, buffer: number[], checksum = 0) {
-    //debugMsg("Running Send Command");
-    this._inputBuffer.length = 0; // Reset input buffer
-    let packet = [0xc0, 0x00]; // direction
-    packet.push(opcode);
-    packet = packet.concat(pack("H", buffer.length));
-    packet = packet.concat(slipEncode(pack("I", checksum)));
-    packet = packet.concat(slipEncode(buffer));
-    packet.push(0xc0);
+    let packet = slipEncode([
+      ...pack("<BBHI", 0x00, opcode, buffer.length, checksum),
+      ...buffer,
+    ]);
     if (this.debug) {
       this.logger.debug(
-        "Writing " +
-          packet.length +
-          " byte" +
-          (packet.length == 1 ? "" : "s") +
-          ":",
+        `Writing ${packet.length} byte${packet.length == 1 ? "" : "s"}:`,
         packet
       );
     }
@@ -611,9 +604,9 @@ export class ESPLoader extends EventTarget {
         }
       }
       if (compress) {
-        await this.flashDeflBlock(block, seq, 2000);
+        await this.flashDeflBlock(block, seq);
       } else {
-        await this.flashBlock(block, seq, 2000);
+        await this.flashBlock(block, seq);
       }
       seq += 1;
       // If using compression we update the progress with the proportional size of the block taking into account the compression ratio.
@@ -643,7 +636,7 @@ export class ESPLoader extends EventTarget {
    * @name flashBlock
    * Send one block of data to program into SPI Flash memory
    */
-  async flashBlock(data: number[], seq: number, timeout = 100) {
+  async flashBlock(data: number[], seq: number, timeout = DEFAULT_TIMEOUT) {
     await this.checkCommand(
       ESP_FLASH_DATA,
       pack("<IIII", data.length, seq, 0, 0).concat(data),
@@ -651,7 +644,7 @@ export class ESPLoader extends EventTarget {
       timeout
     );
   }
-  async flashDeflBlock(data: number[], seq: number, timeout = 100) {
+  async flashDeflBlock(data: number[], seq: number, timeout = DEFAULT_TIMEOUT) {
     await this.checkCommand(
       ESP_FLASH_DEFL_DATA,
       pack("<IIII", data.length, seq, 0, 0).concat(data),
@@ -1095,18 +1088,9 @@ export class ESPLoader extends EventTarget {
   async memFinish(entrypoint = 0) {
     let timeout = this.IS_STUB ? DEFAULT_TIMEOUT : MEM_END_ROM_TIMEOUT;
     let data = pack("<II", entrypoint == 0 ? 1 : 0, entrypoint);
-    // try {
     return await this.checkCommand(ESP_MEM_END, data, 0, timeout);
-    // } catch (err) {
-    //   console.error("Error in memFinish", err);
-    //   if (this.IS_STUB) {
-    //     //  raise
-    //   }
-    //   // pass
-    // }
   }
 
-  // ESPTool Line 706
   async runStub(): Promise<EspStubLoader> {
     const stub = await getStubCode(this.chipFamily);
 

@@ -402,20 +402,18 @@ export class ESPLoader extends EventTarget {
     opcode: number,
     timeout = DEFAULT_TIMEOUT
   ): Promise<[number, number[]]> {
-    let packet;
-    let resp, opRet, lenRet, val, data;
     for (let i = 0; i < 100; i++) {
-      packet = await this.readPacket(timeout);
+      const packet = await this.readPacket(timeout);
 
       if (packet.length < 8) {
         continue;
       }
 
-      [resp, opRet, lenRet, val] = unpack("<BBHI", packet.slice(0, 8));
+      const [resp, opRet, _lenRet, val] = unpack("<BBHI", packet.slice(0, 8));
       if (resp != 1) {
         continue;
       }
-      data = packet.slice(8);
+      const data = packet.slice(8);
       if (opcode == null || opRet == opcode) {
         return [val, data];
       }

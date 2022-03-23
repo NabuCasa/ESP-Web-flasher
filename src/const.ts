@@ -26,10 +26,10 @@ export const ESP32_FLASH_SIZES = {
   "2MB": 0x10,
   "4MB": 0x20,
   "8MB": 0x30,
-  '16MB': 0x40,
-  '32MB': 0x50,
-  '64MB': 0x60,
-  '128MB': 0x70
+  "16MB": 0x40,
+  "32MB": 0x50,
+  "64MB": 0x60,
+  "128MB": 0x70
 };
 
 export const DETECTED_FLASH_SIZES = {

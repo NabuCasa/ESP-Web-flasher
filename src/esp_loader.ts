@@ -19,7 +19,6 @@ import {
   ESP_READ_REG,
   ESP_WRITE_REG,
   ESP_SPI_ATTACH,
-  //ESP_SPI_SET_PARAMS,
   ESP_SYNC,
   FLASH_SECTOR_SIZE,
   FLASH_WRITE_SIZE,
@@ -58,7 +57,7 @@ export class ESPLoader extends EventTarget {
   _efuses = new Array(4).fill(0);
   _flashsize = 4 * 1024 * 1024;
   debug = false;
-  IS_STUB = true;
+  IS_STUB = false;
   connected = true;
   flashSize: string | null = null;
 
@@ -105,7 +104,7 @@ export class ESPLoader extends EventTarget {
     let MACAddr = getSpiFlashAddresses(this.getChipFamily());
     let baseAddr = MACAddr.macFuse;
     for (let i = 0; i < 4; i++) {
-      this._efuses[i] = await this.readRegister(baseAddr! + (4 * i));
+      this._efuses[i] = await this.readRegister(baseAddr! + 4 * i);
     }
     this.logger.log(`Chip type ${this.chipName}`);
 
@@ -114,6 +113,7 @@ export class ESPLoader extends EventTarget {
     // } else {
     //   this.chipName = "ESP8266EX";
     // }
+
     //this.logger.log("FLASHID");
   }
 
@@ -122,9 +122,8 @@ export class ESPLoader extends EventTarget {
    * Reads data from the input stream and places it in the inputBuffer
    */
   async readLoop() {
-    if (this.debug) {
-      this.logger.debug("Starting read loop");
-    }
+    this.logger.debug("Starting read loop");
+
     this._reader = this.port.readable!.getReader();
 
     try {
@@ -145,9 +144,7 @@ export class ESPLoader extends EventTarget {
     // Disconnected!
     this.connected = false;
     this.dispatchEvent(new Event("disconnect"));
-    if (this.debug) {
-      this.logger.debug("Finished read loop");
-    }
+    this.logger.debug("Finished read loop");
   }
 
   async hardReset(bootloader = false) {
@@ -322,11 +319,10 @@ export class ESPLoader extends EventTarget {
         let waitingFor = partialPacket === null ? "header" : "content";
         throw new SlipReadError("Timed out waiting for packet " + waitingFor);
       }
-      if (this.debug) {
+      if (this.debug)
         this.logger.debug(
           "Read " + readBytes.length + " bytes: " + hexFormatter(readBytes)
         );
-      }
       for (let b of readBytes) {
         if (partialPacket === null) {
           // waiting for packet header
@@ -372,11 +368,10 @@ export class ESPLoader extends EventTarget {
           inEscape = true;
         } else if (b == 0xc0) {
           // end of packet
-          if (this.debug) {
+          if (this.debug)
             this.logger.debug(
               "Received full packet: " + hexFormatter(partialPacket)
             );
-          }
           return partialPacket;
         } else {
           // normal byte in packet
@@ -548,7 +543,7 @@ export class ESPLoader extends EventTarget {
       let headerFlashMode = header[2];
       let heatherFlashSizeFreq = header[3];
 
-      this.logger.log(
+      this.logger.debug(
         `Image header, Magic=${toHex(headerMagic)}, FlashMode=${toHex(
           headerFlashMode
         )}, FlashSizeFreq=${toHex(heatherFlashSizeFreq)}`
@@ -669,15 +664,10 @@ export class ESPLoader extends EventTarget {
     let flashWriteSize = this.getFlashWriteSize();
     if (
       !this.IS_STUB &&
-      [CHIP_FAMILY_ESP32, CHIP_FAMILY_ESP32S2, CHIP_FAMILY_ESP32S3, CHIP_FAMILY_ESP32C3].includes(this.chipFamily)
+      [CHIP_FAMILY_ESP32, CHIP_FAMILY_ESP32S2].includes(this.chipFamily)
     ) {
       await this.checkCommand(ESP_SPI_ATTACH, new Array(8).fill(0));
     }
-    //if (this.chipFamily == CHIP_FAMILY_ESP32) {
-      // We are hardcoded for 4MB flash on ESP32
-    //  buffer = pack("<IIIIII", 0, this._flashsize, 0x10000, 4096, 256, 0xffff);
-    //  await this.checkCommand(ESP_SPI_SET_PARAMS, buffer);
-    //}
     let numBlocks = Math.floor((size + flashWriteSize - 1) / flashWriteSize);
     if (this.chipFamily == CHIP_FAMILY_ESP8266) {
       eraseSize = this.getEraseSize(offset, size);
@@ -918,16 +908,12 @@ export class ESPLoader extends EventTarget {
       let words = unpack("I".repeat(Math.floor(data.length / 4)), data);
       let nextReg = SPI_W0_REG;
 
-      if (this.debug) {
-        this.logger.debug(`Words Length: ${words.length}`);
-      }
+      this.logger.debug(`Words Length: ${words.length}`);
 
       for (const word of words) {
-        if (this.debug) {
-          this.logger.debug(
-            `Writing word ${toHex(word)} to register offset ${toHex(nextReg)}`
-          );
-        }
+        this.logger.debug(
+          `Writing word ${toHex(word)} to register offset ${toHex(nextReg)}`
+        );
         await this.writeRegister(nextReg, word);
         nextReg += 4;
       }
